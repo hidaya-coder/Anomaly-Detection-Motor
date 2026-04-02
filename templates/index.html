@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sélecteur de Contexte | Détection d'Anomalies Acoustiques</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Sélecteur de Contexte</h1>
+            <p>Détection d'anomalies machines par analyse acoustique</p>
+        </header>
+
+        <main>
+            <div class="card">
+                <form id="uploadForm">
+                    <div class="form-group">
+                        <label for="machineType">Type de Machine</label>
+                        <select id="machineType" name="type" required>
+                            <option value="" disabled selected>Sélectionnez une machine...</option>
+                            <option value="idmt">Moteur Électrique (Modèle IDMT)</option>
+                            <option value="mimii">Pompe Industrielle (Modèle MIMII)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Fichier Audio (.wav)</label>
+                        <div class="upload-area" id="dropZone">
+                            <input type="file" id="audioFile" name="audio" accept=".wav" required hidden>
+                            <div class="upload-content" id="uploadBtn">
+                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                <span id="fileName">Cliquez ou glissez un fichier audio ici</span>
+                            </div>
+                        </div>
+                        <audio id="audioPreview" controls style="display: none; width: 100%; margin-top: 1rem; border-radius: 6px;"></audio>
+                    </div>
+
+                    <button type="submit" id="submitBtn" class="btn">Lancer l'Analyse</button>
+                </form>
+            </div>
+
+            <!-- RESULT SECTION -->
+            <div class="result-container" id="resultContainer" style="display: none;">
+                <h2>Résultat du Diagnostic</h2>
+                
+                <div class="status-indicator">
+                    <div class="status-circle" id="statusCircle"></div>
+                    <h3 id="statusText">En attente...</h3>
+                </div>
+
+                <div class="score-card">
+                    <div class="metric">
+                        <span class="label">Erreur (MSE)</span>
+                        <span class="value" id="scoreValue">0.00</span>
+                    </div>
+                    <div class="metric">
+                        <span class="label">Seuil Critique</span>
+                        <span class="value" id="thresholdValue">0.00</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="loader" class="loader" style="display: none;">
+                <div class="spinner"></div>
+                <p>Analyse de la signature acoustique...</p>
+            </div>
+
+            <div id="errorMessage" class="error-msg" style="display: none;"></div>
+
+        </main>
+    </div>
+
+    <!-- JavaScript directly included for simplicity -->
+    <script>
+        const form = document.getElementById('uploadForm');
+        const fileInput = document.getElementById('audioFile');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const fileNameDisplay = document.getElementById('fileName');
+        const dropZone = document.getElementById('dropZone');
+        const audioPreview = document.getElementById('audioPreview');
+        
+        const loader = document.getElementById('loader');
+        const resultContainer = document.getElementById('resultContainer');
+        const errorMsg = document.getElementById('errorMessage');
+        
+        const statusCircle = document.getElementById('statusCircle');
+        const statusText = document.getElementById('statusText');
+        const scoreValue = document.getElementById('scoreValue');
+        const thresholdValue = document.getElementById('thresholdValue');
+
+        // File upload UI interactions
+        uploadBtn.addEventListener('click', () => fileInput.click());
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                const file = e.target.files[0];
+                fileNameDisplay.textContent = file.name;
+                fileNameDisplay.style.color = 'var(--text-primary)';
+                
+                const url = URL.createObjectURL(file);
+                audioPreview.src = url;
+                audioPreview.style.display = 'block';
+            }
+        });
+
+        // Form Submission
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // Hide previous results/errors
+            resultContainer.style.display = 'none';
+            errorMsg.style.display = 'none';
+            
+            if (fileInput.files.length === 0) {
+                errorMsg.textContent = "Veuillez insérer un fichier audio.";
+                errorMsg.style.display = 'block';
+                return;
+            }
+
+            const formData = new FormData(form);
+            loader.style.display = 'flex';
+
+            try {
+                // Wait artificially to show the analyzing animation a bit longer because the model is very fast
+                const wait = new Promise(resolve => setTimeout(resolve, 800));
+                
+                const responsePromise = fetch('/predict', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const [_, response] = await Promise.all([wait, responsePromise]);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Erreur lors de la prédiction');
+                }
+
+                // Update UI with results
+                loader.style.display = 'none';
+                resultContainer.style.display = 'block';
+
+                scoreValue.textContent = data.score.toFixed(4);
+                thresholdValue.textContent = data.threshold.toFixed(4);
+
+                // Reset inline styles
+                statusCircle.style.backgroundColor = '';
+                statusCircle.style.boxShadow = '';
+
+                if (data.status === 'WrongMachine') {
+                    statusCircle.className = 'status-circle';
+                    statusCircle.style.backgroundColor = '#fbbf24'; // Warning yellow
+                    statusCircle.style.boxShadow = '0 0 30px rgba(251, 191, 36, 0.4)';
+                    const expectedMachine = data.selected_type === 'idmt' ? 'de moteur' : 'de pompe';
+                    statusText.textContent = `Erreur : Ce n'est pas un son ${expectedMachine} !`;
+                    statusText.style.color = '#d97706';
+                } else if (data.status === 'Normal') {
+                    statusCircle.className = 'status-circle normal';
+                    const machineName = data.machine_type === 'idmt' ? 'Moteur Sain' : 'Pompe Saine';
+                    statusText.textContent = `${machineName} (Normal)`;
+                    statusText.style.color = 'var(--success-color)';
+                } else {
+                    statusCircle.className = 'status-circle anomaly';
+                    const machineName = data.machine_type === 'idmt' ? 'le moteur' : 'la pompe';
+                    statusText.textContent = `Alerte: Anomalie détectée sur ${machineName} !`;
+                    statusText.style.color = 'var(--danger-color)';
+                }
+
+            } catch (err) {
+                loader.style.display = 'none';
+                errorMsg.textContent = err.message;
+                errorMsg.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>
